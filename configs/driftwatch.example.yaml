@@ -1,0 +1,30 @@
+# driftwatch example configuration
+# Copy this file to driftwatch.yaml and adjust to your setup.
+
+# How often to poll and compare environment state.
+check_interval: 5m
+
+environments:
+  # Each entry represents one infrastructure environment to monitor.
+  - name: staging
+    provider: aws          # Supported: aws, gcp, static
+    region: us-east-1
+    tags:
+      team: platform
+      tier: non-prod
+
+  - name: production
+    provider: aws
+    region: us-west-2
+    tags:
+      team: platform
+      tier: prod
+
+alerts:
+  # Set a Slack incoming webhook URL to receive drift notifications.
+  # Leave empty to disable Slack alerts.
+  slack_webhook: ""
+
+  # When true, drift is only written to the application log and no
+  # external notifications are sent. Useful during initial setup.
+  log_only: true
