@@ -73,6 +73,33 @@ func TestDetector_ExtraKeyInTarget(t *testing.T) {
 	}
 }
 
+func TestDetector_MultipleDriftTypes(t *testing.T) {
+	d := drift.NewDetector()
+	base := makeSnapshot(t, "staging", map[string]string{
+		"DB_HOST":   "localhost",
+		"FEATURE_X": "true",
+	})
+	target := makeSnapshot(t, "production", map[string]string{
+		"DB_HOST": "prod-db.internal",
+		"NEW_KEY": "value",
+	})
+
+	result := d.Compare(base, target)
+
+	if !result.Drifted {
+		t.Fatal("expected drift but got none")
+	}
+	if len(result.DiffKeys) != 1 || result.DiffKeys[0] != "DB_HOST" {
+		t.Errorf("unexpected DiffKeys: %v", result.DiffKeys)
+	}
+	if len(result.MissingKeys) != 1 || result.MissingKeys[0] != "FEATURE_X" {
+		t.Errorf("unexpected MissingKeys: %v", result.MissingKeys)
+	}
+	if len(result.ExtraKeys) != 1 || result.ExtraKeys[0] != "NEW_KEY" {
+		t.Errorf("unexpected ExtraKeys: %v", result.ExtraKeys)
+	}
+}
+
 func TestResult_String_NoDrift(t *testing.T) {
 	r := drift.Result{BaseEnv: "staging", TargetEnv: "production", Drifted: false}
 	got := r.String()
