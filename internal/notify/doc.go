@@ -1,22 +1,24 @@
-// Package notify provides integrations for delivering drift alerts to
-// external systems.
+// Package notify provides pluggable notification backends for DriftWatch.
 //
-// Currently supported sinks:
+// Supported senders:
 //
-//	- WebhookSender: HTTP POST of a JSON payload to a configurable URL.
+//   - WebhookSender: posts JSON payloads to an HTTP endpoint.
+//   - SlackSender:   sends formatted messages to a Slack incoming webhook.
+//   - EmailSender:   delivers drift alerts via SMTP.
+//   - MultiSender:   fans out to multiple Sender implementations, collecting
+//     all errors without short-circuiting.
 //
-// # Webhook payload
+// All senders implement the Sender interface:
 //
-// The JSON body contains the environment name, a timestamp (UTC), the total
-// number of drifted keys, and a list of individual drift entries each
-// carrying the key name together with its baseline and current values.
-//
-// # Usage
-//
-//	sender := notify.NewWebhookSender("https://hooks.example.com/drift", 10*time.Second)
-//	if err := sender.Send("production", drifts); err != nil {
-//		log.Printf("webhook send failed: %v", err)
+//	type Sender interface {
+//	    Send(env string, drifts []drift.Drift) error
 //	}
 //
-// A timeout of zero or negative defaults to 10 seconds.
+// When no drifts are present, senders should return nil without performing
+// any network I/O. Use MultiSender to compose several backends together:
+//
+//	m := notify.NewMultiSender(webhookSender, slackSender, emailSender)
+//	if err := m.Send("production", drifts); err != nil {
+//	    log.Printf("one or more notifications failed: %v", err)
+//	}
 package notify
