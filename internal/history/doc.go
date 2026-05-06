@@ -1,30 +1,27 @@
-// Package history provides persistent storage and querying of drift detection
-// records for driftwatch.
+// Package history persists drift detection results over time and provides
+// querying, pruning, and summarisation utilities.
 //
-// Records are written as JSON files under a configurable directory, one file
-// per monitored environment.  The package exposes three primary concerns:
+// # Store
 //
-//   - Store: low-level save/load of drift.Drift slices.
-//   - Query / Summarize: filtered reads and aggregate statistics.
-//   - Prune: time-based and count-based cleanup of old records.
+// NewStore creates a file-backed store rooted at a given directory. Each
+// environment gets its own JSON record file. Use Save to append a new drift
+// event and LoadAll to retrieve the full history for an environment.
 //
-// Typical usage:
+// # Query helpers
 //
-//	store, err := history.NewStore("/var/lib/driftwatch/history")
-//	if err != nil { ... }
+// Since filters records to those detected after a given time.
+// Limit returns the most-recent N records.
+// Summarize returns per-key drift counts across a slice of records.
 //
-//	// persist new drifts
-//	_ = store.Save("production", drifts)
+// # Summary
 //
-//	// query recent records
-//	results, _ := store.Query(history.QueryOptions{
-//		Environment: "production",
-//		Since:       time.Now().Add(-24 * time.Hour),
-//		Limit:       50,
-//	})
+// BuildEnvSummary aggregates stored records for an environment into an
+// EnvSummary, including total event count, time range, and the most
+// frequently drifting keys. WriteSummary formats the summary for human
+// consumption.
 //
-//	// remove records older than 30 days
-//	_, _ = store.Prune("production", history.PruneOptions{
-//		OlderThan: 30 * 24 * time.Hour,
-//	})
+// # Pruner
+//
+// Prune removes records that are older than a retention threshold or trims
+// history to a maximum number of records per environment, keeping the newest.
 package history
