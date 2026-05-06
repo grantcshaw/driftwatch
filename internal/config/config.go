@@ -52,6 +52,16 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// Environment returns the environment with the given name, or an error if not found.
+func (c *Config) Environment(name string) (*Environment, error) {
+	for i := range c.Environments {
+		if c.Environments[i].Name == name {
+			return &c.Environments[i], nil
+		}
+	}
+	return nil, fmt.Errorf("environment %q not found", name)
+}
+
 func (c *Config) validate() error {
 	if len(c.Environments) == 0 {
 		return fmt.Errorf("at least one environment must be defined")
