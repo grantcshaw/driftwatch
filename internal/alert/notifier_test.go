@@ -95,3 +95,31 @@ func TestNotify_AlertTimestampIsRecent(t *testing.T) {
 		t.Errorf("alert timestamp %v out of expected range [%v, %v]", a.Timestamp, before, after)
 	}
 }
+
+// TestNotify_AlertDriftCountMatchesInput verifies that the returned alert
+// records exactly the number of drifts passed to Notify.
+func TestNotify_AlertDriftCountMatchesInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		keys  []string
+	}{
+		{"single drift", []string{"KEY_A"}},
+		{"multiple drifts", []string{"KEY_A", "KEY_B", "KEY_C"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf strings.Builder
+			n := alert.NewNotifier(&buf, 10)
+			a, err := n.Notify("env", makeDrifts(tc.keys...))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if a == nil {
+				t.Fatal("expected non-nil alert")
+			}
+			if len(a.Drifts) != len(tc.keys) {
+				t.Errorf("expected %d drifts in alert, got %d", len(tc.keys), len(a.Drifts))
+			}
+		})
+	}
+}
