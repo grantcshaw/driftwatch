@@ -62,6 +62,15 @@ func (c *Config) Environment(name string) (*Environment, error) {
 	return nil, fmt.Errorf("environment %q not found", name)
 }
 
+// EnvironmentNames returns a slice of all configured environment names.
+func (c *Config) EnvironmentNames() []string {
+	names := make([]string, len(c.Environments))
+	for i, env := range c.Environments {
+		names[i] = env.Name
+	}
+	return names
+}
+
 func (c *Config) validate() error {
 	if len(c.Environments) == 0 {
 		return fmt.Errorf("at least one environment must be defined")
