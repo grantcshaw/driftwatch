@@ -62,3 +62,17 @@ func TestReport_Summary_WithDrift(t *testing.T) {
 		t.Errorf("expected count in summary, got: %s", summary)
 	}
 }
+
+// makeDrifts is a test helper that constructs a slice of DriftItem values
+// from the provided key names, using placeholder expected/actual values.
+func makeDrifts(keys ...string) []report.DriftItem {
+	items := make([]report.DriftItem, 0, len(keys))
+	for _, k := range keys {
+		items = append(items, report.DriftItem{
+			Key:      k,
+			Expected: "expected-" + k,
+			Actual:   "actual-" + k,
+		})
+	}
+	return items
+}
