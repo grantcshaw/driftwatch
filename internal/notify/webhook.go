@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -74,7 +75,9 @@ func (w *WebhookSender) Send(env string, drifts []drift.Drift) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook: unexpected status %d from %s", resp.StatusCode, w.URL)
+		// Read up to 256 bytes of the response body to aid debugging.
+		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		return fmt.Errorf("webhook: unexpected status %d from %s: %s", resp.StatusCode, w.URL, bytes.TrimSpace(preview))
 	}
 	return nil
 }
