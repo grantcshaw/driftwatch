@@ -1,24 +1,27 @@
-// Package notify provides pluggable notification backends for DriftWatch.
+// Package notify provides composable Sender implementations for delivering
+// drift alerts to external systems.
 //
-// Supported senders:
+// Core senders:
+//   - WebhookSender  — HTTP POST to a configurable endpoint
+//   - SlackSender    — Slack incoming webhook with colour-coded severity
+//   - EmailSender    — SMTP email delivery
+//   - LoggerSender   — writes structured drift lines to an io.Writer
 //
-//   - WebhookSender: posts JSON payloads to an HTTP endpoint.
-//   - SlackSender:   sends formatted messages to a Slack incoming webhook.
-//   - EmailSender:   delivers drift alerts via SMTP.
-//   - MultiSender:   fans out to multiple Sender implementations, collecting
-//     all errors without short-circuiting.
+// Middleware / decorators (wrap any Sender):
+//   - MultiSender    — fan-out to multiple senders in parallel
+//   - Filter         — gate on minimum severity or cooldown
+//   - RateLimiter    — cap sends per environment within a sliding window
+//   - Throttle       — suppress repeated sends within a fixed interval
+//   - Retry          — retry transient failures with configurable attempts
+//   - DeadLetter     — persist failed payloads to disk for later replay
+//   - Digest         — batch drifts over a time window before forwarding
+//   - CircuitBreaker — open/half-open/closed protection against downstream failures
 //
-// All senders implement the Sender interface:
+// Typical composition:
 //
-//	type Sender interface {
-//	    Send(env string, drifts []drift.Drift) error
-//	}
-//
-// When no drifts are present, senders should return nil without performing
-// any network I/O. Use MultiSender to compose several backends together:
-//
-//	m := notify.NewMultiSender(webhookSender, slackSender, emailSender)
-//	if err := m.Send("production", drifts); err != nil {
-//	    log.Printf("one or more notifications failed: %v", err)
-//	}
+//	base := notify.NewWebhookSender(cfg)
+//	withRetry, _ := notify.NewRetry(base, 3)
+//	withCB, _ := notify.NewCircuitBreaker(withRetry, 5, time.Minute)
+//	withRL, _ := notify.NewRateLimiter(withCB, time.Hour, 10)
+//	sender := notify.NewFilter(withRL, drift.SeverityWarning, 0)
 package notify
