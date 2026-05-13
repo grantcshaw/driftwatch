@@ -82,6 +82,24 @@ func TestSenderMetrics_Send_Error(t *testing.T) {
 	}
 }
 
+func TestSenderMetrics_Send_MultipleCallsAccumulate(t *testing.T) {
+	inner := &mockMetricsSender{}
+	m, _ := NewSenderMetrics(inner, "webhook", nil)
+
+	for i := 0; i < 3; i++ {
+		if err := m.Send("prod", makeMetricsDrifts(1)); err != nil {
+			t.Fatalf("unexpected error on call %d: %v", i, err)
+		}
+	}
+
+	if m.SendTotal != 3 {
+		t.Errorf("expected SendTotal=3 after three calls, got %d", m.SendTotal)
+	}
+	if m.SendErrors != 0 {
+		t.Errorf("expected SendErrors=0, got %d", m.SendErrors)
+	}
+}
+
 func TestSenderMetrics_Summary(t *testing.T) {
 	inner := &mockMetricsSender{}
 	m, _ := NewSenderMetrics(inner, "email", nil)
