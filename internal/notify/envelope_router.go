@@ -1,75 +1,86 @@
 package notify
 
 import (
-	"context"
 	"fmt"
-	"sync"
+	"strings"
+
+	"github.com/yourorg/driftwatch/internal/drift"
 )
 
-// Route associates a label selector with a Sender. An envelope is
-// dispatched to the route if all selector key/value pairs appear in
-// the envelope's Labels map. An empty selector matches every envelope.
-type Route struct {
-	Selector map[string]string
-	Sender   Sender
-}
-
-// EnvelopeRouter dispatches Envelopes to one or more Senders based on
-// label selectors. Routes are evaluated in registration order; all
-// matching routes receive the envelope (fan-out).
+// EnvelopeRouter routes drift envelopes to different senders based on selectors.
 type EnvelopeRouter struct {
-	mu     sync.RWMutex
-	routes []Route
+	routes []routeEntry
+	fallback Sender
 }
 
-// NewEnvelopeRouter returns an empty EnvelopeRouter.
-func NewEnvelopeRouter() *EnvelopeRouter {
-	return &EnvelopeRouter{}
+type routeEntry struct {
+	selector Selector
+	sender   Sender
 }
 
-// AddRoute registers a route. Returns an error if the sender is nil.
-func (r *EnvelopeRouter) AddRoute(selector map[string]string, s Sender) error {
+// Selector defines criteria for matching an envelope.
+type Selector struct {
+	// Env matches envelopes for this environment name (empty = any).
+	Env string
+	// MinSeverity is the minimum severity to match ("warning" or "critical").
+	MinSeverity string
+}
+
+// NewEnvelopeRouter creates a router with an optional fallback sender.
+func NewEnvelopeRouter(fallback Sender) *EnvelopeRouter {
+	return &EnvelopeRouter{fallback: fallback}
+}
+
+// AddRoute registers a sender for drifts matching the given selector.
+func (r *EnvelopeRouter) AddRoute(sel Selector, s Sender) error {
 	if s == nil {
 		return fmt.Errorf("envelope_router: sender must not be nil")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.routes = append(r.routes, Route{Selector: selector, Sender: s})
+	if sel.MinSeverity != "" && sel.MinSeverity != "warning" && sel.MinSeverity != "critical" {
+		return fmt.Errorf("envelope_router: invalid min_severity %q", sel.MinSeverity)
+	}
+	r.routes = append(r.routes, routeEntry{selector: sel, sender: s})
 	return nil
 }
 
-// Dispatch sends the envelope to all matching routes. Errors from
-// individual senders are collected and returned as a combined error.
-func (r *EnvelopeRouter) Dispatch(ctx context.Context, env *Envelope) error {
-	if env == nil {
-		return fmt.Errorf("envelope_router: envelope must not be nil")
+// Send routes the drifts to every matching sender; falls back if none match.
+func (r *EnvelopeRouter) Send(env string, drifts []drift.Drift) error {
+	if len(drifts) == 0 {
+		return nil
 	}
-	r.mu.RLock()
-	routes := make([]Route, len(r.routes))
-	copy(routes, r.routes)
-	r.mu.RUnlock()
-
-	var errs []error
-	for _, route := range routes {
-		if matchesSelector(route.Selector, env.Labels) {
-			if err := route.Sender.Send(ctx, env.Drifts); err != nil {
-				errs = append(errs, fmt.Errorf("route to %T: %w", route.Sender, err))
-			}
+	var matched bool
+	var errs []string
+	for _, route := range r.routes {
+		if !matchesSelector(route.selector, env, drifts) {
+			continue
+		}
+		matched = true
+		if err := route.sender.Send(env, drifts); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if !matched && r.fallback != nil {
+		if err := r.fallback.Send(env, drifts); err != nil {
+			errs = append(errs, err.Error())
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("envelope_router: %d sender(s) failed: %v", len(errs), errs)
+		return fmt.Errorf("envelope_router: %s", strings.Join(errs, "; "))
 	}
 	return nil
 }
 
-// matchesSelector returns true when every key/value pair in selector
-// exists with the same value in labels.
-func matchesSelector(selector, labels map[string]string) bool {
-	for k, v := range selector {
-		if labels[k] != v {
-			return false
+func matchesSelector(sel Selector, env string, drifts []drift.Drift) bool {
+	if sel.Env != "" && sel.Env != env {
+		return false
+	}
+	if sel.MinSeverity == "critical" {
+		for _, d := range drifts {
+			if d.Severity == "critical" {
+				return true
+			}
 		}
+		return false
 	}
 	return true
 }

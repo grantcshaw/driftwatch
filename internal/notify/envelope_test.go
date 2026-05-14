@@ -2,85 +2,78 @@ package notify
 
 import (
 	"testing"
-	"time"
 
 	"github.com/yourorg/driftwatch/internal/drift"
 )
 
-func makeEnvelopeDrifts(numChanges int) []drift.Drift {
-	changes := make([]drift.Change, numChanges)
-	for i := range changes {
-		changes[i] = drift.Change{Key: fmt.Sprintf("key%d", i), Old: "a", New: "b"}
+func makeEnvelopeDrifts(n int) []drift.Drift {
+	out := make([]drift.Drift, n)
+	for i := range out {
+		out[i] = drift.Drift{Key: fmt.Sprintf("KEY_%d", i), BaselineValue: "a", CurrentValue: "b"}
 	}
-	return []drift.Drift{{Environment: "prod", Changes: changes}}
+	return out
 }
 
 func TestNewEnvelope_EmptyEnv_Errors(t *testing.T) {
-	_, err := NewEnvelope("", nil)
+	_, err := NewEnvelope("", &mockSender{})
 	if err == nil {
-		t.Fatal("expected error for empty environment name")
+		t.Error("expected error for empty env")
+	}
+}
+
+func TestNewEnvelope_NilInner_Errors(t *testing.T) {
+	_, err := NewEnvelope("prod", nil)
+	if err == nil {
+		t.Error("expected error for nil inner sender")
 	}
 }
 
 func TestNewEnvelope_NoDrifts_WarningDefault(t *testing.T) {
-	e, err := NewEnvelope("staging", []drift.Drift{})
-	if err != nil {
+	recv := &mockSender{}
+	e, _ := NewEnvelope("prod", recv)
+	if err := e.Send("prod", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if e.Severity != SeverityWarning {
-		t.Errorf("expected warning, got %s", e.Severity)
+	if recv.called {
+		t.Error("expected inner sender not to be called with no drifts")
 	}
 }
 
 func TestNewEnvelope_SingleChange_Warning(t *testing.T) {
-	drifts := makeEnvelopeDrifts(1)
-	e, err := NewEnvelope("prod", drifts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	recv := &mockSender{}
+	e, _ := NewEnvelope("prod", recv)
+	drifts := []drift.Drift{{Key: "X", BaselineValue: "a", CurrentValue: "b"}}
+	_ = e.Send("prod", drifts)
+	if !recv.called {
+		t.Fatal("expected inner sender to be called")
 	}
-	if e.Severity != SeverityWarning {
-		t.Errorf("expected warning, got %s", e.Severity)
+	for _, d := range recv.lastDrifts {
+		if d.Severity != "warning" {
+			t.Errorf("expected warning, got %q", d.Severity)
+		}
 	}
 }
 
 func TestNewEnvelope_MultipleChanges_Critical(t *testing.T) {
+	recv := &mockSender{}
+	e, _ := NewEnvelope("prod", recv)
 	drifts := makeEnvelopeDrifts(3)
-	e, err := NewEnvelope("prod", drifts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if e.Severity != SeverityCritical {
-		t.Errorf("expected critical, got %s", e.Severity)
-	}
-}
-
-func TestNewEnvelope_SetsDetectedAt(t *testing.T) {
-	before := time.Now().UTC()
-	e, _ := NewEnvelope("dev", nil)
-	after := time.Now().UTC()
-	if e.DetectedAt.Before(before) || e.DetectedAt.After(after) {
-		t.Errorf("DetectedAt %v not in expected range [%v, %v]", e.DetectedAt, before, after)
+	_ = e.Send("prod", drifts)
+	for _, d := range recv.lastDrifts {
+		if d.Severity != "critical" {
+			t.Errorf("expected critical, got %q", d.Severity)
+		}
 	}
 }
 
-func TestEnvelope_WithLabel(t *testing.T) {
-	e, _ := NewEnvelope("dev", nil)
-	e.WithLabel("team", "platform").WithLabel("region", "us-east-1")
-	if e.Labels["team"] != "platform" {
-		t.Errorf("expected label team=platform, got %q", e.Labels["team"])
-	}
-	if e.Labels["region"] != "us-east-1" {
-		t.Errorf("expected label region=us-east-1, got %q", e.Labels["region"])
-	}
-}
-
-func TestEnvelope_IsCritical(t *testing.T) {
-	e, _ := NewEnvelope("prod", makeEnvelopeDrifts(2))
-	if !e.IsCritical() {
-		t.Error("expected IsCritical to return true")
-	}
-	w, _ := NewEnvelope("prod", makeEnvelopeDrifts(1))
-	if w.IsCritical() {
-		t.Error("expected IsCritical to return false for warning envelope")
+func TestNewEnvelope_PreservesExistingSeverity(t *testing.T) {
+	recv := &mockSender{}
+	e, _ := NewEnvelope("prod", recv)
+	drifts := []drift.Drift{{Key: "Y", BaselineValue: "1", CurrentValue: "2", Severity: "critical"}}
+	_ = e.Send("prod", drifts)
+	for _, d := range recv.lastDrifts {
+		if d.Severity != "critical" {
+			t.Errorf("expected preserved critical, got %q", d.Severity)
+		}
 	}
 }

@@ -2,72 +2,47 @@ package notify
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/yourorg/driftwatch/internal/drift"
 )
 
-// Severity represents the urgency level of a drift notification.
-type Severity string
-
-const (
-	SeverityWarning  Severity = "warning"
-	SeverityCritical Severity = "critical"
-)
-
-// Envelope wraps a set of drifts with routing metadata used by
-// pipeline stages (filter, throttle, priority, etc.).
+// Envelope wraps a Sender and attaches computed severity metadata before
+// forwarding, ensuring downstream senders always have severity populated.
 type Envelope struct {
-	// Environment the drifts belong to.
-	Environment string
-
-	// Drifts is the list of detected drift items.
-	Drifts []drift.Drift
-
-	// Severity is the highest severity across all drifts.
-	Severity Severity
-
-	// DetectedAt is when the drift was first observed.
-	DetectedAt time.Time
-
-	// Labels are arbitrary key/value pairs for routing or filtering.
-	Labels map[string]string
+	env    string
+	inner  Sender
 }
 
-// NewEnvelope creates an Envelope, computing the aggregate severity
-// from the provided drifts.
-func NewEnvelope(env string, drifts []drift.Drift) (*Envelope, error) {
+// NewEnvelope creates an Envelope for the given environment name.
+func NewEnvelope(env string, inner Sender) (*Envelope, error) {
 	if env == "" {
-		return nil, fmt.Errorf("envelope: environment name must not be empty")
+		return nil, fmt.Errorf("envelope: env must not be empty")
 	}
-	sev := computeSeverity(drifts)
-	return &Envelope{
-		Environment: env,
-		Drifts:      drifts,
-		Severity:    sev,
-		DetectedAt:  time.Now().UTC(),
-		Labels:      make(map[string]string),
-	}, nil
+	if inner == nil {
+		return nil, fmt.Errorf("envelope: inner sender must not be nil")
+	}
+	return &Envelope{env: env, inner: inner}, nil
 }
 
-// WithLabel returns the envelope with an additional label set.
-func (e *Envelope) WithLabel(key, value string) *Envelope {
-	e.Labels[key] = value
-	return e
-}
-
-// IsCritical reports whether the envelope carries critical severity.
-func (e *Envelope) IsCritical() bool {
-	return e.Severity == SeverityCritical
-}
-
-// computeSeverity returns critical if any drift has more than one changed
-// key, otherwise warning. An empty slice returns warning.
-func computeSeverity(drifts []drift.Drift) Severity {
-	for _, d := range drifts {
-		if len(d.Changes) > 1 {
-			return SeverityCritical
+// Send annotates each drift with a computed severity then forwards them.
+func (e *Envelope) Send(env string, drifts []drift.Drift) error {
+	if len(drifts) == 0 {
+		return nil
+	}
+	annotated := make([]drift.Drift, len(drifts))
+	for i, d := range drifts {
+		if d.Severity == "" {
+			d.Severity = computeSeverity(drifts)
 		}
+		annotated[i] = d
 	}
-	return SeverityWarning
+	return e.inner.Send(env, annotated)
+}
+
+// computeSeverity returns "critical" when there are multiple drifts, else "warning".
+func computeSeverity(drifts []drift.Drift) string {
+	if len(drifts) > 1 {
+		return "critical"
+	}
+	return "warning"
 }
