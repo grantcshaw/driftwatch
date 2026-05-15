@@ -3,65 +3,78 @@ package drift
 import (
 	"fmt"
 
-	"github.com/yourusername/driftwatch/internal/environment"
+	"github.com/yourorg/driftwatch/internal/environment"
 )
 
-// Result holds the outcome of a drift comparison between two snapshots.
-type Result struct {
-	BaseEnv    string
-	TargetEnv  string
-	Drifted    bool
-	DiffKeys   []string
-	MissingKeys []string
-	ExtraKeys  []string
+// Drift describes a single configuration key that differs between
+// a baseline snapshot and the current environment snapshot.
+type Drift struct {
+	Key           string
+	BaselineValue string
+	CurrentValue  string
+	Severity      string            // "warning" or "critical"
+	Metadata      map[string]string // optional annotations
 }
 
-// String returns a human-readable summary of the drift result.
-func (r Result) String() string {
-	if !r.Drifted {
-		return fmt.Sprintf("[OK] %s and %s are in sync", r.BaseEnv, r.TargetEnv)
+// Detector compares a baseline snapshot against a current snapshot
+// and produces a list of Drift items.
+type Detector struct {
+	criticalKeys map[string]struct{}
+}
+
+// NewDetector constructs a Detector. criticalKeys is an optional set of
+// key names that should be reported with severity "critical" instead of
+// the default "warning".
+func NewDetector(criticalKeys []string) *Detector {
+	cm := make(map[string]struct{}, len(criticalKeys))
+	for _, k := range criticalKeys {
+		cm[k] = struct{}{}
 	}
-	return fmt.Sprintf("[DRIFT] %s vs %s — changed: %d, missing: %d, extra: %d",
-		r.BaseEnv, r.TargetEnv, len(r.DiffKeys), len(r.MissingKeys), len(r.ExtraKeys))
+	return &Detector{criticalKeys: cm}
 }
 
-// Detector compares environment snapshots to identify configuration drift.
-type Detector struct{}
-
-// NewDetector creates a new Detector instance.
-func NewDetector() *Detector {
-	return &Detector{}
-}
-
-// Compare checks two snapshots for drift and returns a detailed Result.
-func (d *Detector) Compare(base, target *environment.Snapshot) Result {
-	result := Result{
-		BaseEnv:   base.EnvName,
-		TargetEnv: target.EnvName,
+// Detect returns all keys that differ between baseline and current.
+// Keys present only in baseline are reported as missing (CurrentValue = "").
+// Keys present only in current are reported as extra (BaselineValue = "").
+func (d *Detector) Detect(baseline, current *environment.Snapshot) ([]Drift, error) {
+	if baseline == nil {
+		return nil, fmt.Errorf("detector: baseline snapshot must not be nil")
+	}
+	if current == nil {
+		return nil, fmt.Errorf("detector: current snapshot must not be nil")
 	}
 
-	baseKeys := base.Keys()
-	targetMap := target.ToMap()
-	baseMap := base.ToMap()
+	var drifts []Drift
 
-	for _, key := range baseKeys {
-		targetVal, exists := targetMap[key]
-		if !exists {
-			result.MissingKeys = append(result.MissingKeys, key)
-		} else if baseMap[key] != targetVal {
-			result.DiffKeys = append(result.DiffKeys, key)
+	for k, bv := range baseline.Values {
+		cv, ok := current.Values[k]
+		if !ok {
+			drifts = append(drifts, d.newDrift(k, bv, ""))
+			continue
+		}
+		if bv != cv {
+			drifts = append(drifts, d.newDrift(k, bv, cv))
 		}
 	}
 
-	for key := range targetMap {
-		if _, exists := baseMap[key]; !exists {
-			result.ExtraKeys = append(result.ExtraKeys, key)
+	for k, cv := range current.Values {
+		if _, exists := baseline.Values[k]; !exists {
+			drifts = append(drifts, d.newDrift(k, "", cv))
 		}
 	}
 
-	result.Drifted = len(result.DiffKeys) > 0 ||
-		len(result.MissingKeys) > 0 ||
-		len(result.ExtraKeys) > 0
+	return drifts, nil
+}
 
-	return result
+func (d *Detector) newDrift(key, baseline, current string) Drift {
+	sev := "warning"
+	if _, ok := d.criticalKeys[key]; ok {
+		sev = "critical"
+	}
+	return Drift{
+		Key:           key,
+		BaselineValue: baseline,
+		CurrentValue:  current,
+		Severity:      sev,
+	}
 }
